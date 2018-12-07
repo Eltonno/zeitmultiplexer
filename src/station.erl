@@ -10,24 +10,36 @@
 -author("Elton").
 
 %% API
--export([start/1,transmitter_loop/2,receiver_loop/2]).
+-export([start/4,transmitter_loop/5,receiver_loop/5, init_transmitter/5, init_receiver/5]).
+
+-define(TTL, 1).
 
 
-start(Offset) ->
-  RecPID = spawn(?MODULE, reciever_loop, []),
-  spawn(?MODULE, init_transmitter, [RecPID, Offset]).
+start(Offset, MultiCastAddress, Address, Port) ->
+  {ok, Socket} = gen_udp:open(Port,[
+    binary,
+    {active, false},
+    {reuseaddr, true},
+    {multicast_if, Address},
+    inet,
+    {multicast_ttl, ?TTL},
+    {multicast_loop, true},
+    {add_membership, {MultiCastAddress, Address}},
+    {ip, MultiCastAddress}]),
+  RecPID = spawn(?MODULE, reciever_loop, [Offset, [], Socket, Address, Port]),
+  spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, Address, Port]).
 
-init_transmitter(RecPID, Offset) ->
+init_transmitter(RecPID, Offset, Socket,Address,Port) ->
   X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+990,
   timer:send_after(X, RecPID, {self(), getslotlist}),
   receive
     {_,L} ->
       Slot = selectslot(L),
       X =  (Slot-1) * 40, %%(1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ Eventuell muss das wegen timing noch benutzt werden
-      timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, Offset])
+      timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, Offset,Socket,Address, Port])
   end.
 
-transmitter_loop(RecPID, Offset) ->
+transmitter_loop(RecPID, Offset,Socket, Address, Port) ->
   RecPID ! {self(), getslotlist},
   receive
     {_,L} ->
@@ -35,33 +47,37 @@ transmitter_loop(RecPID, Offset) ->
       %%TODO: Datenpaket zusammenbauen
       case io:read("") of
         eof ->
-          transmitter_loop(RecPID, Offset);
-        {ok, Term} ->
-          ok;
+          transmitter_loop(RecPID, Offset, Socket, Address, Port);
+        {ok, Package} ->
+          %%TODO: Slot überprüfen
+          X = ((1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)/ 40)+1,
+          %%TODO: Datenpaket verschicken mit multicast
+          gen_udp:send(Socket, Address, Port, Package);
         {error, ErrorInfo} ->
           ok;
         {error, ErrorDescription} ->
           ok
       end,
-      %%TODO: Slot überprüfen
-      %%TODO: Datenpaket verschicken mit multicast
-
       %%Berechnung vom nächsten X
       X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ (Slot-1) * 40,
       timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, Offset])
   end.
 
-receiver_loop(Offset, Oclist) ->
+init_receiver(Offset, Oclist, Socket, Address, Port) ->
+  ok = gen_udp:controlling_process(Socket, self()),
+  receiver_loop(Offset, Oclist, Socket, Address, Port).
+
+receiver_loop(Offset, Oclist, Socket, Address, Port) ->
   X = 1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000,
   timer:send_after(X, resetlist),
   receive
     {TranPID, getslotlist} ->
       TranPID ! {self(), Oclist},
-      receiver_loop(Offset, Oclist);
+      receiver_loop(Offset, Oclist, Socket, Address, Port);
     resetlist ->
-      receiver_loop(Offset,[]);
+      receiver_loop(Offset,[], Socket, Address, Port);
     Any ->
-      receiver_loop(Offset,Oclist)
+      receiver_loop(Offset, Oclist, Socket, Address, Port)
   end.
 
 member(_,[]) ->
