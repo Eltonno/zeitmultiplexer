@@ -30,6 +30,8 @@ start(Offset, MultiCastAddress, Address, Port) ->
   spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, Address, Port]).
 
 init_transmitter(RecPID, Offset, Socket,Address,Port) ->
+  %% Es wird für den Rest dieses Frames, sowie für den gesamten nächsten (-10 ms um resetlist zu vermeiden) zugehört, und dann
+  %% die Liste mit den reservierten Slots angefragt.
   X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+990,
   timer:send_after(X, RecPID, {self(), getslotlist}),
   receive
@@ -69,6 +71,7 @@ init_receiver(Offset, Oclist, Socket, Address, Port) ->
 
 receiver_loop(Offset, Oclist, Socket, Address, Port) ->
   X = 1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000,
+  %% Zur vollen Sekunde (Ende des Frames) wird die Reservierungsliste geleert
   timer:send_after(X, resetlist),
   receive
     {TranPID, getslotlist} ->
