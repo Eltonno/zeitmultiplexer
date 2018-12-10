@@ -26,7 +26,7 @@ start(Offset, MultiCastAddress, Address, Port) ->
     {multicast_loop, true},
     {add_membership, {MultiCastAddress, Address}},
     {ip, MultiCastAddress}]),
-  RecPID = spawn(?MODULE, reciever_loop, [Offset, [], Socket, Address, Port]),
+  RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, Address, Port]),
   spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, Address, Port]).
 
 init_transmitter(RecPID, Offset, Socket,Address,Port) ->
@@ -52,7 +52,10 @@ transmitter_loop(RecPID, Offset,Socket, Address, Port) ->
           %%TODO: Slot überprüfen
           X = ((1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)/ 40)+1,
           %%TODO: Datenpaket verschicken mit multicast
-          gen_udp:send(Socket, Address, Port, Package);
+          if
+            X == Slot ->
+              gen_udp:send(Socket, Address, Port, Package)
+          end;
         {error, ErrorInfo} ->
           ok;
         {error, ErrorDescription} ->
