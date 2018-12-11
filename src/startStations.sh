@@ -49,7 +49,7 @@ teamNo="2"
 # Example:    dataSource="~/somewhere/DataSource"
 #         or  dataSource="java -cp . datasource.DataSource"
 ########################################################################################################
-dataSource="./datasource/64bit/Vessel3"
+dataSource="java -cp . datasource/java/vessel3"
 
 ########################################################################################################
 # TODO: Enter your station's start command.
