@@ -57,7 +57,7 @@ dataSource="./datasource/64bit/Vessel3"
 #
 # Example: stationCmd="java aufgabe4.MyStation $interfaceName $mcastAddress $receivePort $stationClass"
 ########################################################################################################
-stationCmd="erl -noshell -s station start $UTCoffsetMs $mcastAddress $mcastAddress $receivePort $stationClass $interfaceName"
+stationCmd="erl -noshell -s station start $UTCoffsetMs $mcastAddress $mcastAddress $receivePort $stationClass"
 
 
 printUsage() {
