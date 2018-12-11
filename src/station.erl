@@ -16,20 +16,21 @@
 
 
 start([Interface, MultiCastAddress, Port, ClockClass, Offset]) ->
-  {ok, [{addr,{Address}}]} =inet:getif(Interface,[addr]),
+  InterfaceAddress = vsutil:getInterfaceIp(Interface),
   util:logging("logfile.log", "ist gestartet"),
   {ok, Socket} = gen_udp:open(Port,[
-    binary,
-    {active, false},
+    {mode, binary},
+    {active, true},
     {reuseaddr, true},
-    {multicast_if, MultiCastAddress},
-    inet,
+    {multicast_if, atom_to_list(MultiCastAddress)},
     {multicast_ttl, ?TTL},
     {multicast_loop, true},
-    {add_membership, {MultiCastAddress, Address}},
+    {broadcast,true},
+    {add_membership, {atom_to_list(MultiCastAddress), InterfaceAddress}},
     {ip, MultiCastAddress}]),
-  RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, Address, Port, ClockClass]),
-  TranPID = spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, Address, Port, ClockClass]),
+ %% Socket = vsutil:openRecA(list_to_atom(MultiCastAddress), InterfaceAddress, Port),
+  RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, InterfaceAddress, Port, ClockClass]),
+  TranPID = spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, InterfaceAddress, Port, ClockClass]),
   spawn(?MODULE, gen_receiver, [RecPID, TranPID, Socket, ClockClass]).
 
 init_transmitter(RecPID, Offset, Socket,Address,Port,ClockClass) ->
