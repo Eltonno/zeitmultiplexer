@@ -18,17 +18,19 @@
 start([Interface, MultiCastAddress, Port, ClockClass, Offset]) ->
   InterfaceAddress = vsutil:getInterfaceIp(Interface),
   util:logging("logfile.log", "ist gestartet"),
-  {ok, Socket} = gen_udp:open(Port,[
-    {mode, binary},
-    {active, true},
-    {reuseaddr, true},
-    {multicast_if, atom_to_list(MultiCastAddress)},
-    {multicast_ttl, ?TTL},
-    {multicast_loop, true},
-    {broadcast,true},
-    {add_membership, {atom_to_list(MultiCastAddress), InterfaceAddress}},
-    {ip, MultiCastAddress}]),
- %% Socket = vsutil:openRecA(list_to_atom(MultiCastAddress), InterfaceAddress, Port),
+  {_, MultiCastAddr} = inet:parse_address(atom_to_list(MultiCastAddress)),
+  PortInteger = list_to_integer(atom_to_list(Port)),
+%%  {ok, Socket} = gen_udp:open(Port,[
+%%    {mode, binary},
+%%    {active, true},
+%%    {reuseaddr, true},
+%%    {multicast_if, atom_to_list(MultiCastAddress)},
+%%    {multicast_ttl, ?TTL},
+%%    {multicast_loop, true},
+%%    {broadcast,true},
+%%    {add_membership, {MultiCastAddress, list_to_atom(InterfaceAddress)}},
+%%    {ip, MultiCastAddress}]),
+  Socket = vsutil:openRecA(MultiCastAddr, InterfaceAddress, PortInteger),
   RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, InterfaceAddress, Port, ClockClass]),
   TranPID = spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, InterfaceAddress, Port, ClockClass]),
   spawn(?MODULE, gen_receiver, [RecPID, TranPID, Socket, ClockClass]).
@@ -36,13 +38,13 @@ start([Interface, MultiCastAddress, Port, ClockClass, Offset]) ->
 init_transmitter(RecPID, Offset, Socket,Address,Port,ClockClass) ->
   %% Es wird für den Rest dieses Frames, sowie für den gesamten nächsten (-10 ms um resetlist zu vermeiden) zugehört, und dann
   %% die Liste mit den reservierten Slots angefragt.
-  X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+990,
+  X = ((vsutil:now2UTC(erlang:timestamp())+list_to_integer(atom_to_list(Offset)))rem 1000)+990,
   timer:send_after(X, RecPID, {self(), getslotlist}),
   receive
     {_,L,NewOffset} ->
       Slot = selectslot(L),
-      X =  (Slot-1) * 40, %%(1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ Eventuell muss das wegen timing noch benutzt werden
-      timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, NewOffset, Socket, Address, Port, ClockClass])
+      SleepTimer =  (Slot-1) * 40, %%(1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ Eventuell muss das wegen timing noch benutzt werden
+      timer:apply_after(SleepTimer,?MODULE, transmitter_loop, [RecPID, NewOffset, Socket, Address, Port, ClockClass])
   end.
 
 transmitter_loop(RecPID, Offset, Socket, Address, Port, ClockClass, Slot) ->
@@ -54,7 +56,7 @@ transmitter_loop(RecPID, Offset, Socket, Address, Port, ClockClass, Slot) ->
         eof ->
           transmitter_loop(RecPID, NewOffset, Socket, Address, Port, ClockClass, Slot);
         {ok, Data} ->
-          X = ((1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)/ 40)+1,
+          X = (((vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)/ 40)+1,
           %%TODO: Datenpaket verschicken mit multicast
           if
             X == Slot ->
@@ -85,7 +87,7 @@ init_receiver(Offset, Oclist, Socket, Address, Port, ClockClass) ->
   receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass).
 
 receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass) ->
-  X = 1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000,
+  X = (1000 - vsutil:now2UTC(erlang:timestamp())+list_to_integer(atom_to_list(Offset)))rem 1000,
   %% Zur vollen Sekunde (Ende des Frames) wird die Reservierungsliste geleert
   timer:send_after(X, resetlist),
   receive
