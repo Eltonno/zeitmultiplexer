@@ -16,6 +16,7 @@
 
 
 start(Offset, MultiCastAddress, Address, Port, ClockClass) ->
+  util:logging("logfile.log", "ist gestartet"),
   {ok, Socket} = gen_udp:open(Port,[
     binary,
     {active, false},
