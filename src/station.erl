@@ -10,12 +10,12 @@
 -author("Elton").
 
 %% API
--export([start/5, init_transmitter/6, init_receiver/6, transmitter_loop/7, gen_receiver/4]).
+-export([start/1, init_transmitter/6, init_receiver/6, transmitter_loop/7, gen_receiver/4]).
 
 -define(TTL, 1).
 
 
-start(Interface, MultiCastAddress, Port, ClockClass, Offset) ->
+start([Interface, MultiCastAddress, Port, ClockClass, Offset]) ->
   {ok, [{addr,{Address}}]} =inet:getif(Interface,[addr]),
   util:logging("logfile.log", "ist gestartet"),
   {ok, Socket} = gen_udp:open(Port,[

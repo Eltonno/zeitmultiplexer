@@ -49,7 +49,7 @@ teamNo="2"
 # Example:    dataSource="~/somewhere/DataSource"
 #         or  dataSource="java -cp . datasource.DataSource"
 ########################################################################################################
-dataSource="java -cp . vessel3.Vessel"
+dataSource="./datasource/64bit/Vessel3"
 
 ########################################################################################################
 # TODO: Enter your station's start command.
@@ -57,8 +57,7 @@ dataSource="java -cp . vessel3.Vessel"
 #
 # Example: stationCmd="java aufgabe4.MyStation $interfaceName $mcastAddress $receivePort $stationClass"
 ########################################################################################################
-stationCmd="erl -noshell -s station start $UTCoffsetMs $mcastAddress $mcastAddress $receivePort $stationClass"
-
+stationCmd="erl -noshell -s station start $interfaceName $mcastAddress $receivePort $stationClass $UTCoffsetMs"
 
 printUsage() {
 	echo "Usage: $0 <interface> <multicast-address> <receive-port> <from-station-index> <to-station-index> <station-class> [ <UTC-offset-(ms)> ]"
