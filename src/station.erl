@@ -10,12 +10,12 @@
 -author("Elton").
 
 %% API
--export([start/4,transmitter_loop/5,receiver_loop/5, init_transmitter/5, init_receiver/5]).
+-export([start/5, init_transmitter/7, init_receiver/6, transmitter_loop/7, gen_receiver/4]).
 
 -define(TTL, 1).
 
 
-start(Offset, MultiCastAddress, Address, Port) ->
+start(Offset, MultiCastAddress, Address, Port, ClockClass) ->
   {ok, Socket} = gen_udp:open(Port,[
     binary,
     {active, false},
@@ -26,65 +26,93 @@ start(Offset, MultiCastAddress, Address, Port) ->
     {multicast_loop, true},
     {add_membership, {MultiCastAddress, Address}},
     {ip, MultiCastAddress}]),
-  RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, Address, Port]),
-  spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, Address, Port]).
+  RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, Address, Port, ClockClass,0]),
+  TranPID = spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, Address, Port, ClockClass]),
+  spawn(?MODULE, gen_receiver, [RecPID, TranPID, Socket, ClockClass]).
 
-init_transmitter(RecPID, Offset, Socket,Address,Port) ->
+init_transmitter(RecPID, Offset, Socket,Address,Port,ClockClass,TimerStart) ->
   %% Es wird für den Rest dieses Frames, sowie für den gesamten nächsten (-10 ms um resetlist zu vermeiden) zugehört, und dann
   %% die Liste mit den reservierten Slots angefragt.
   X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+990,
   timer:send_after(X, RecPID, {self(), getslotlist}),
   receive
-    {_,L} ->
+    {_,L,NewOffset} ->
       Slot = selectslot(L),
       X =  (Slot-1) * 40, %%(1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ Eventuell muss das wegen timing noch benutzt werden
-      timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, Offset,Socket,Address, Port])
+      timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, NewOffset, Socket, Address, Port, ClockClass])
   end.
 
-transmitter_loop(RecPID, Offset,Socket, Address, Port) ->
+transmitter_loop(RecPID, Offset, Socket, Address, Port, ClockClass, Slot) ->
   RecPID ! {self(), getslotlist},
   receive
-    {_,L} ->
-      Slot = selectslot(L),
-      %%TODO: Datenpaket zusammenbauen
+    {_,L,NewOffset} ->
+      NewSlot = selectslot(L),
       case io:read("") of
         eof ->
-          transmitter_loop(RecPID, Offset, Socket, Address, Port);
-        {ok, Package} ->
-          %%TODO: Slot überprüfen
+          transmitter_loop(RecPID, NewOffset, Socket, Address, Port, ClockClass, Slot);
+        {ok, Data} ->
           X = ((1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)/ 40)+1,
           %%TODO: Datenpaket verschicken mit multicast
           if
             X == Slot ->
-              gen_udp:send(Socket, Address, Port, Package)
+              Package = vsutil:concatBinary(vsutil:createBinaryS(ClockClass),vsutil:createBinaryD(Data),vsutil:createBinaryNS(NewSlot),vsutil:createBinaryT(vsutil:now2UTC(erlang:timestamp())+NewOffset)),
+              RemSlotTime = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 40),
+              if
+                RemSlotTime =< 20 ->
+                  gen_udp:send(Socket, Address, Port, Package);
+                true ->
+                  timer:sleep(RemSlotTime - 20),
+                  gen_udp:send(Socket, Address, Port, Package)
+              end,
+              %%Berechnung vom nächsten X
+              X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ (Slot-1) * 40,
+              timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, Offset, Socket, Address, Port, ClockClass, NewSlot]);
+            X > Slot ->
+              init_transmitter(RecPID,Offset,Socket,Address,Port,ClockClass,0);
+            true ->
+              Sleep = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 40)+ (Slot-X+1) * 40,
+              timer:apply_after(Sleep,?MODULE, transmitter_loop, [RecPID, Offset,Socket,Address,Port,ClockClass, Slot])
           end;
         {error, ErrorInfo} ->
           ok;
         {error, ErrorDescription} ->
           ok
-      end,
-      %%Berechnung vom nächsten X
-      X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ (Slot-1) * 40,
-      timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, Offset])
+      end
   end.
 
-init_receiver(Offset, Oclist, Socket, Address, Port) ->
-  ok = gen_udp:controlling_process(Socket, self()),
-  receiver_loop(Offset, Oclist, Socket, Address, Port).
+init_receiver(Offset, Oclist, Socket, Address, Port, ClockClass) ->
+  receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass).
 
-receiver_loop(Offset, Oclist, Socket, Address, Port) ->
+receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass) ->
   X = 1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000,
   %% Zur vollen Sekunde (Ende des Frames) wird die Reservierungsliste geleert
   timer:send_after(X, resetlist),
   receive
     {TranPID, getslotlist} ->
-      TranPID ! {self(), Oclist},
-      receiver_loop(Offset, Oclist, Socket, Address, Port);
+      TranPID ! {self(), Oclist, Offset},
+      receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass);
     resetlist ->
-      receiver_loop(Offset,[], Socket, Address, Port);
+      receiver_loop(Offset,[], Socket, Address, Port, ClockClass);
+    {packet, Slot, OffsetDiff} ->
+      NewOclist = append(Oclist,Slot),
+      NewOffset = Offset + OffsetDiff,
+      receiver_loop(NewOffset, NewOclist, Socket, Address, Port, ClockClass);
     Any ->
-      receiver_loop(Offset, Oclist, Socket, Address, Port)
+      receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass)
   end.
+
+gen_receiver(RecPID, TranPID, Socket, ClockClass) ->
+  ok = gen_udp:controlling_process(Socket, self()),
+  {ok, RecvData} = gen_udp:recv(Socket, 34),
+  {_Address, _Port, Packet} = RecvData,
+  {StationTyp,_Nutzdaten,Slot,Timestamp} = vsutil:message_to_string(Packet),
+  if
+    StationTyp == "A" ->
+      TimeDiff = Timestamp - vsutil:now2UTC(erlang:timestamp()),
+      RecPID ! {packet, Slot, TimeDiff/2}
+  end,
+  RecPID ! {packet, Slot, 0},
+  gen_receiver(RecPID, TranPID, Socket, ClockClass).
 
 member(_,[]) ->
   false;
@@ -102,4 +130,48 @@ selectslot(L) ->
       selectslot(L);
     true ->
       Rand
+  end.
+
+append([], []) ->
+  [];
+append([],[H|T]) ->
+  [H|T];
+append([],Elem) ->
+  [Elem];
+append([H|T], []) ->
+  [H|T];
+append(Elem, []) ->
+  [Elem];
+append([H1|T1],[H2|T2]) ->
+  append([H1|T1] ++ [H2], T2);
+append([H|T],Elem) ->
+  [H|T] ++ [Elem];
+append(L,[H|T]) ->
+  append([L] ++ [H], T);
+append(E1,E2) ->
+  [E1] ++ [E2].
+
+keyfind(_,[]) ->
+  false;
+keyfind(Key, Tuplelist) ->
+  [Head|Rest] = Tuplelist,
+  {K,_} = Head,
+  if K == Key -> Head;
+    true -> keyfind(Key,Rest)
+  end.
+
+keystore(_,[],Tupel) ->
+  [Tupel];
+keystore(Key,[Head|Rest],Tupel) ->
+  {K,_}= Head,
+  if K == Key -> append(Tupel, Rest);
+    true -> keystore(Key,Rest,[Head],Tupel)
+  end.
+
+keystore(_,[],Front,Tupel) ->
+  append(Front, Tupel);
+keystore(Key,[Head|Rest],Front,Tupel) ->
+  {K,_} = Head,
+  if K == Key -> append(append(Front,Tupel),Rest);
+    true -> keystore(Key,Rest,append(Front,Head),Tupel)
   end.
