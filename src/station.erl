@@ -15,13 +15,14 @@
 -define(TTL, 1).
 
 
-start(Offset, MultiCastAddress, Address, Port, ClockClass) ->
+start(Interface, MultiCastAddress, Port, ClockClass, Offset) ->
+  {ok, [{addr,{Address}}]} =inet:getif(Interface,[addr]),
   util:logging("logfile.log", "ist gestartet"),
   {ok, Socket} = gen_udp:open(Port,[
     binary,
     {active, false},
     {reuseaddr, true},
-    {multicast_if, Address},
+    {multicast_if, MultiCastAddress},
     inet,
     {multicast_ttl, ?TTL},
     {multicast_loop, true},
