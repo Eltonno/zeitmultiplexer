@@ -10,7 +10,7 @@
 -author("Elton").
 
 %% API
--export([start/5, init_transmitter/7, init_receiver/6, transmitter_loop/7, gen_receiver/4]).
+-export([start/5, init_transmitter/6, init_receiver/6, transmitter_loop/7, gen_receiver/4]).
 
 -define(TTL, 1).
 
@@ -28,11 +28,11 @@ start(Interface, MultiCastAddress, Port, ClockClass, Offset) ->
     {multicast_loop, true},
     {add_membership, {MultiCastAddress, Address}},
     {ip, MultiCastAddress}]),
-  RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, Address, Port, ClockClass,0]),
+  RecPID = spawn(?MODULE, init_receiver, [Offset, [], Socket, Address, Port, ClockClass]),
   TranPID = spawn(?MODULE, init_transmitter, [RecPID, Offset, Socket, Address, Port, ClockClass]),
   spawn(?MODULE, gen_receiver, [RecPID, TranPID, Socket, ClockClass]).
 
-init_transmitter(RecPID, Offset, Socket,Address,Port,ClockClass,TimerStart) ->
+init_transmitter(RecPID, Offset, Socket,Address,Port,ClockClass) ->
   %% Es wird für den Rest dieses Frames, sowie für den gesamten nächsten (-10 ms um resetlist zu vermeiden) zugehört, und dann
   %% die Liste mit den reservierten Slots angefragt.
   X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+990,
@@ -70,14 +70,12 @@ transmitter_loop(RecPID, Offset, Socket, Address, Port, ClockClass, Slot) ->
               X = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 1000)+ (Slot-1) * 40,
               timer:apply_after(X,?MODULE, transmitter_loop, [RecPID, Offset, Socket, Address, Port, ClockClass, NewSlot]);
             X > Slot ->
-              init_transmitter(RecPID,Offset,Socket,Address,Port,ClockClass,0);
+              init_transmitter(RecPID,Offset,Socket,Address,Port,ClockClass);
             true ->
               Sleep = (1000 - (vsutil:now2UTC(erlang:timestamp())+Offset)rem 40)+ (Slot-X+1) * 40,
               timer:apply_after(Sleep,?MODULE, transmitter_loop, [RecPID, Offset,Socket,Address,Port,ClockClass, Slot])
           end;
-        {error, ErrorInfo} ->
-          ok;
-        {error, ErrorDescription} ->
+        {error, _ErrorInfo} ->
           ok
       end
   end.
@@ -99,7 +97,7 @@ receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass) ->
       NewOclist = append(Oclist,Slot),
       NewOffset = Offset + OffsetDiff,
       receiver_loop(NewOffset, NewOclist, Socket, Address, Port, ClockClass);
-    Any ->
+    _Any ->
       receiver_loop(Offset, Oclist, Socket, Address, Port, ClockClass)
   end.
 
@@ -152,28 +150,28 @@ append(L,[H|T]) ->
   append([L] ++ [H], T);
 append(E1,E2) ->
   [E1] ++ [E2].
-
-keyfind(_,[]) ->
-  false;
-keyfind(Key, Tuplelist) ->
-  [Head|Rest] = Tuplelist,
-  {K,_} = Head,
-  if K == Key -> Head;
-    true -> keyfind(Key,Rest)
-  end.
-
-keystore(_,[],Tupel) ->
-  [Tupel];
-keystore(Key,[Head|Rest],Tupel) ->
-  {K,_}= Head,
-  if K == Key -> append(Tupel, Rest);
-    true -> keystore(Key,Rest,[Head],Tupel)
-  end.
-
-keystore(_,[],Front,Tupel) ->
-  append(Front, Tupel);
-keystore(Key,[Head|Rest],Front,Tupel) ->
-  {K,_} = Head,
-  if K == Key -> append(append(Front,Tupel),Rest);
-    true -> keystore(Key,Rest,append(Front,Head),Tupel)
-  end.
+%%
+%%keyfind(_,[]) ->
+%%  false;
+%%keyfind(Key, Tuplelist) ->
+%%  [Head|Rest] = Tuplelist,
+%%  {K,_} = Head,
+%%  if K == Key -> Head;
+%%    true -> keyfind(Key,Rest)
+%%  end.
+%%
+%%keystore(_,[],Tupel) ->
+%%  [Tupel];
+%%keystore(Key,[Head|Rest],Tupel) ->
+%%  {K,_}= Head,
+%%  if K == Key -> append(Tupel, Rest);
+%%    true -> keystore(Key,Rest,[Head],Tupel)
+%%  end.
+%%
+%%keystore(_,[],Front,Tupel) ->
+%%  append(Front, Tupel);
+%%keystore(Key,[Head|Rest],Front,Tupel) ->
+%%  {K,_} = Head,
+%%  if K == Key -> append(append(Front,Tupel),Rest);
+%%    true -> keystore(Key,Rest,append(Front,Head),Tupel)
+%%  end.
